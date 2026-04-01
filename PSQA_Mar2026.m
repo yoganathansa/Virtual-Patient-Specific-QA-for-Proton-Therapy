@@ -803,6 +803,105 @@ end
 
 
 
+function loss = softGammaLoss(doseEval, doseRef, dDose, dDistance, Threshold, mode)
+% ============================================================
+% Differentiable Soft Gamma Loss (DL-compatible)
+% Works with dlarray + GPU + dlgradient
+%
+% Inputs:
+%   doseEval  - dlarray (H x W x B)
+%   doseRef   - dlarray (H x W x B)
+%   dDose     - % dose criterion (e.g. 3)
+%   dDistance - DTA (pixels)
+%   Threshold - % threshold (e.g. 10)
+%   mode      - 'local' or 'global'
+%
+% Output:
+%   loss      - scalar differentiable loss
+% ============================================================
+
+epsVal = 1e-8;
+tau = 1.0;        % softness for threshold
+alpha = 10.0;     % sharpness for gamma penalty
+
+[H,W,B] = size(doseEval);
+
+lossBatch = 0;
+
+for b = 1:B
+
+    doseE = doseEval(:,:,b);
+    doseR = doseRef(:,:,b);
+
+    % Normalize to [0,100]
+    doseE = ((doseE + 1)/2) * 100;
+    doseR = ((doseR + 1)/2) * 100;
+
+    maxRef = max(doseR,[],'all');
+    doseE = doseE * 100 / (maxRef + epsVal);
+    doseR = doseR * 100 / (maxRef + epsVal);
+
+    % Smooth threshold mask (sigmoid instead of hard cutoff)
+    weight = 1 ./ (1 + exp(-(doseE - Threshold)/tau));
+
+    % Precompute shifts
+    gammaVals = [];
+
+    for dx = -dDistance:dDistance
+        for dy = -dDistance:dDistance
+
+            if sqrt(dx^2 + dy^2) > dDistance
+                continue;
+            end
+
+            shiftedRef = circshift(doseR,[dy dx]);
+
+            % Dose term
+            switch lower(mode)
+                case 'global'
+                    denom = (dDose/100 * maxRef)^2 + epsVal;
+                case 'local'
+                    denom = (dDose/100 * doseE).^2 + epsVal;
+            end
+
+            doseTerm = (doseE - shiftedRef).^2 ./ denom;
+
+            % Spatial term
+            spatialTerm = (dx^2 + dy^2) / (dDistance^2);
+
+            gammaVals = cat(3, gammaVals, doseTerm + spatialTerm);
+        end
+    end
+
+    % ========================================================
+    % SOFT MIN (log-sum-exp trick)
+    % ========================================================
+    beta = 20; % controls approximation to min
+
+    softMinGammaSq = -log(sum(exp(-beta * gammaVals),3) + epsVal) / beta;
+
+    gamma = sqrt(softMinGammaSq + epsVal);
+
+    % ========================================================
+    %  SOFT PASS/FAIL PENALTY
+    % Instead of gamma > 1
+    % ========================================================
+    penalty = log(1 + exp(alpha * (gamma - 1))); % softplus
+
+    % Apply weighting (threshold region emphasis)
+    weightedPenalty = weight .* penalty;
+
+    % Mean loss for slice
+    lossBatch = lossBatch + mean(weightedPenalty,'all');
+
+end
+
+loss = lossBatch / B;
+
+end
+
+
+
 
 
 
