@@ -702,7 +702,8 @@ lineScoreDiscY   = animatedline(scoreAxesY, 'Color', 'g', 'LineWidth', 1.5);
 lineValLossX2Y   = animatedline(LossAxesY, 'Color', 'b', 'Marker', '*', 'LineWidth', 1.2);
 
 end
-%%
+
+%% Gamma Evaluation on GPU
 function [pass_rate, gammaMap] = myGamma_gpu_batch(doseEval, doseRef, dDose, dDistance, Threshold, sliceIdx, mode)
 % ============================================================
 % Fully vectorized TG-218 compliant gamma (GPU)
